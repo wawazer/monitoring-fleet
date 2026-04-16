@@ -62,7 +62,7 @@ export default function Page() {
     <div className="p-4 bg-black min-h-screen text-white">
       {/* HEADER */}
       <div className="mb-4">
-        <h1 className="text-xl font-bold">🚗 Fleet Monitoring</h1>
+        <h1 className="text-xl font-bold">P-Car Monitoring</h1>
         <p className="text-sm text-gray-400">
           Last Update: {data.updated_at}
         </p>
