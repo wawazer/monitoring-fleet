@@ -110,7 +110,7 @@ export default function Page() {
                 <td className="sticky left-0 bg-gray-900 border border-gray-700 p-2 z-10">
   <div className="font-semibold">{unit.name}</div>
   <div className="text-xs text-gray-400">
-    👨 {unit.driver || "-"}
+    {unit.driver || "-"}
   </div>
 </td>
 
