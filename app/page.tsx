@@ -21,21 +21,31 @@ type Data = {
   units: Unit[];
 };
 
-const API_URL =
-  "https://script.googleusercontent.com/macros/echo?user_content_key=AWDtjMW-2BTts4wx9AGvZAPSNIXMnDRCDB86NV9IqjuRYtN1_v7CzTVKckdfcNNeHbbbR9Nd_rRFLlAyqT-zi5m-l_sv6f4h6zNL6orELYnzfuWqrXzgtfGfrT4sTOKbVGkgLzWmQKqbR0Tqoiau-IUPbnB7hik9UNB4frNw9nY_bt_NEZaAPnm4xCIbekzNjf4vp6baT4ti--d6_ckQ_yULKzaXasD61oPJ4o1MC3iL1lABW641UhERFi36W1Ctp8JwCG5_-Hj27_yTtxBjz8G2QQZX_pFPyhjV8BavJiR9Hdzdk4sk2Xgi4CzgsFWgMg&lib=MrWHUQA7yB4bleQ3kVXzaOGeBDUCRHfbS";
+// const API_URL =
+//   "https://script.googleusercontent.com/macros/echo?user_content_key=AWDtjMW-2BTts4wx9AGvZAPSNIXMnDRCDB86NV9IqjuRYtN1_v7CzTVKckdfcNNeHbbbR9Nd_rRFLlAyqT-zi5m-l_sv6f4h6zNL6orELYnzfuWqrXzgtfGfrT4sTOKbVGkgLzWmQKqbR0Tqoiau-IUPbnB7hik9UNB4frNw9nY_bt_NEZaAPnm4xCIbekzNjf4vp6baT4ti--d6_ckQ_yULKzaXasD61oPJ4o1MC3iL1lABW641UhERFi36W1Ctp8JwCG5_-Hj27_yTtxBjz8G2QQZX_pFPyhjV8BavJiR9Hdzdk4sk2Xgi4CzgsFWgMg&lib=MrWHUQA7yB4bleQ3kVXzaOGeBDUCRHfbS";
 
 export default function Page() {
   const [data, setData] = useState<Data | null>(null);
 
-  const fetchData = async () => {
-    try {
-      const res = await fetch(API_URL);
-      const json = await res.json();
-      setData(json);
-    } catch (err) {
-      console.error("Fetch error:", err);
+ const fetchData = async () => {
+  try {
+    const res = await fetch("/api/dashboard", {
+      cache: "no-store",
+    });
+
+    if (!res.ok) {
+      throw new Error(`HTTP error ${res.status}`);
     }
-  };
+
+    const json = await res.json();
+
+    console.log("Dashboard data:", json);
+
+    setData(json);
+  } catch (err) {
+    console.error("Fetch error:", err);
+  }
+};
 
   // 🔄 AUTO REFRESH 5 MENIT
   useEffect(() => {
