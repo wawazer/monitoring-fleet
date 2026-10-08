@@ -1,38 +1,82 @@
+let fleetData:any = null;
+
+
+// GET
 export async function GET() {
 
   return Response.json({
+
     success:true,
+
     message:"Fleet API aktif",
-    time:new Date()
+
+    updated_at:
+      fleetData?.updated_at || null,
+
+    units:
+      fleetData?.units?.length || 0
+
   });
 
 }
 
 
+
+// POST
 export async function POST(request:Request){
 
   try {
 
+
     const body = await request.json();
 
-    console.log("P-CAR DATA:", body);
+
+    console.log(
+      "P-CAR DATA MASUK:",
+      JSON.stringify(body,null,2)
+    );
+
+
+    if(!body.data){
+
+      return Response.json({
+
+        success:false,
+
+        message:"Format data harus {data:{...}}"
+
+      },{
+        status:400
+      });
+
+    }
+
+
+
+    fleetData = body.data;
+
 
 
     return Response.json({
 
       success:true,
-      message:"Data P-CAR berhasil diterima",
+
+      message:"Data fleet berhasil disimpan",
 
       units:
-        body.data?.units?.length || 0,
+        fleetData.units?.length || 0,
+
 
       updated_at:
-        body.data?.updated_at || null
+        fleetData.updated_at || null
+
 
     });
 
 
-  } catch(error){
+
+  }catch(error){
+
 
     return Response.json({
 
@@ -43,9 +87,11 @@ export async function POST(request:Request){
         ? error.message
         : String(error)
 
+
     },{
       status:500
     });
+
 
   }
 
