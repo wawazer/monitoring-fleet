@@ -5,6 +5,10 @@ export async function POST(request: Request) {
   try {
 
     const { message } = await request.json();
+    console.log(
+  "KEY CHECK:",
+  process.env.GEMINI_API_KEY?.slice(0,10)
+);
 
     const genAI = new GoogleGenerativeAI(
       process.env.GEMINI_API_KEY!
@@ -12,7 +16,7 @@ export async function POST(request: Request) {
 
 
     const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash"
+      model: "gemini-3.8-flash"
     });
 
 
