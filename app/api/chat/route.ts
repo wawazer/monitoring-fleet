@@ -1,100 +1,43 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
+export async function POST(request: Request) {
 
-const genAI = new GoogleGenerativeAI(
-  process.env.GEMINI_API_KEY!
-);
+  try {
 
+    const { message } = await request.json();
 
-export async function POST(request:Request){
-
-  try{
-
-
-    const body = await request.json();
+    const genAI = new GoogleGenerativeAI(
+      process.env.GEMINI_API_KEY!
+    );
 
 
-    const question = body.message;
-
-
-    if(!question){
-
-      return Response.json({
-
-        success:false,
-
-        message:"Pertanyaan kosong"
-
-      });
-
-    }
-
-
-
-    const model =
-      genAI.getGenerativeModel({
-        model:"gemini-1.5-flash"
-      });
-
-
-
-    const prompt = `
-
-Kamu adalah AI Fleet Assistant untuk sistem P-CAR.
-
-Jawab pertanyaan pengguna mengenai:
-- ketersediaan kendaraan
-- booking kendaraan
-- status armada
-- driver
-
-
-Pertanyaan user:
-
-${question}
-
-`;
-
-
-
-    const result =
-      await model.generateContent(prompt);
-
-
-
-    const answer =
-      result.response.text();
-
-
-
-    return Response.json({
-
-      success:true,
-
-      answer:answer
-
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.5-flash"
     });
 
 
+    const result = await model.generateContent(message);
 
-  }catch(error){
+    const response = result.response.text();
 
 
     return Response.json({
+      success:true,
+      reply:response
+    });
 
+
+  } catch(error){
+
+    return Response.json({
       success:false,
-
       error:
         error instanceof Error
         ? error.message
         : String(error)
-
     },{
-
       status:500
-
     });
-
 
   }
 
