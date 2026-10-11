@@ -92,16 +92,36 @@ export async function POST(request: Request) {
     });
 
     const responseText = await gasResponse.text();
+    const gasContentType = gasResponse.headers.get("content-type") || "unknown";
     let result: GASSubmitResult;
 
     try {
       result = JSON.parse(responseText) as GASSubmitResult;
     } catch {
-      console.error(
-        "Respons GAS tidak berbentuk JSON. HTTP status:",
-        gasResponse.status
+      // Jangan menampilkan isi respons mentah ke browser karena respons HTML
+      // bisa berisi detail teknis. Simpan cuplikan terbatas di Vercel Logs.
+      const responsePreview = responseText.replace(/\s+/g, " ").slice(0, 400);
+      console.error("[P-CAR] GAS mengembalikan respons non-JSON", {
+        status: gasResponse.status,
+        statusText: gasResponse.statusText,
+        contentType: gasContentType,
+        finalUrl: gasResponse.url,
+        responsePreview,
+      });
+
+      let hint = "Periksa Vercel Function Logs dan deployment Web App GAS.";
+      if (/script function not found.*doPost/i.test(responseText)) {
+        hint = "Versi Web App GAS yang aktif belum memiliki doPost(e). Deploy New version.";
+      } else if (/accounts\.google\.com|sign in|signin|login/i.test(responseText)) {
+        hint = "GAS meminta login; periksa akses Web App agar dapat diakses siapa saja sesuai kebijakan aplikasi.";
+      } else if (/exception|error|not found/i.test(responseText)) {
+        hint = "GAS mengembalikan halaman error; periksa cuplikan respons di Vercel Function Logs.";
+      }
+
+      return jsonError(
+        `GAS tidak mengembalikan JSON (HTTP ${gasResponse.status}; ${gasContentType}). ${hint}`,
+        502
       );
-      return jsonError("Respons backend P-CAR tidak dapat dibaca.", 502);
     }
 
     if (!gasResponse.ok || !result.ok) {
@@ -126,6 +146,3 @@ export async function POST(request: Request) {
     return jsonError("Terjadi kesalahan saat mengirim pengajuan ke P-CAR.", 500);
   }
 }
-
-
-//add
