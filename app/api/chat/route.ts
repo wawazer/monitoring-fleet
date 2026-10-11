@@ -1,12 +1,27 @@
+/**
+ * P-CAR Fleet Assistant chat API.
+ * Requires GEMINI_API_KEY and a deployed app/api/submit-request/route.ts.
+ * Submit gateway uses server-only PCAR_GAS_WEBAPP_URL and PCAR_GAS_API_SECRET.
+ */
+
+
+
 import { GoogleGenerativeAI } from "@google/generative-ai";
+
 import { checkFleetAvailability } from "@/lib/fleetHelper";
+
 import { FLEET_SYSTEM_RULES } from "@/lib/fleetRules";
 
+/**
+ * Gunakan satu URL Web App GAS dari Vercel Environment Variables.
+ * Nilai PCAR_GAS_WEBAPP_URL harus URL deployment aktif yang berakhir /exec.
+ * Query action=dashboard_json ditambahkan khusus untuk membaca dashboard.
+ */
 function getGasDashboardUrl_(): string {
   const configuredUrl = process.env.PCAR_GAS_WEBAPP_URL;
 
   if (!configuredUrl) {
-    throw new Error("https://script.google.com/macros/s/AKfycbxICLEfVFaYQdZydstk4kwmZHipDNvTSxB2xj1DwATX9wHAmCCW8FZQf9SiwxiEgtlOnQ/exec?action=dashboard_json");
+    throw new Error("PCAR_GAS_WEBAPP_URL belum dikonfigurasi di Vercel.");
   }
 
   const url = new URL(configuredUrl);
