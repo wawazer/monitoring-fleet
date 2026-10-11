@@ -21,7 +21,7 @@ function getGasDashboardUrl_(): string {
   const configuredUrl = process.env.PCAR_GAS_WEBAPP_URL;
 
   if (!configuredUrl) {
-    throw new Error("PCAR_GAS_WEBAPP_URL belum dikonfigurasi di Vercel.");
+    throw new Error("https://script.google.com/macros/s/AKfycbxICLEfVFaYQdZydstk4kwmZHipDNvTSxB2xj1DwATX9wHAmCCW8FZQf9SiwxiEgtlOnQ/exec");
   }
 
   const url = new URL(configuredUrl);
@@ -660,7 +660,7 @@ ${message.trim()}
           reply: [
             `Unit ${selected.name} tersedia untuk jadwal yang dipilih.`,
             `Untuk melanjutkan pengajuan, kirim data berikut dalam satu pesan: ${missingApplicantFields.join(", ")}.`,
-            "Gunakan pilihan tipe perjalanan yang berlaku di P-CAR. Jika URGENT, sertakan alasannya.",
+            "Gunakan pilihan tipe perjalanan yang berlaku di P-CAR. Perjalanan Dinas, Keperluan Internal (Tanpa SPPD) dan Urgent. Jika URGENT, sertakan alasannya.",
             "Untuk perjalanan dinas, sertakan dasar/nomor SPPD.",
             "Jika ada, sertakan daftar tamu, hotel, dan link HTTPS file SPPD.",
             "Data identitas akan diperiksa admin sebelum pengajuan diteruskan ke approval."
