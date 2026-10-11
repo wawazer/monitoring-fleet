@@ -6,7 +6,7 @@ function getGasDashboardUrl_(): string {
   const configuredUrl = process.env.PCAR_GAS_WEBAPP_URL;
 
   if (!configuredUrl) {
-    throw new Error("PCAR_GAS_WEBAPP_URL belum dikonfigurasi di Vercel.");
+    throw new Error("https://script.google.com/macros/s/AKfycbxICLEfVFaYQdZydstk4kwmZHipDNvTSxB2xj1DwATX9wHAmCCW8FZQf9SiwxiEgtlOnQ/exec?action=dashboard_json");
   }
 
   const url = new URL(configuredUrl);
