@@ -1,7 +1,5 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-
 import { checkFleetAvailability } from "@/lib/fleetHelper";
-
 import { FLEET_SYSTEM_RULES } from "@/lib/fleetRules";
 
 const GAS_URL =
@@ -232,21 +230,45 @@ export async function POST(request: Request) {
 
     }
 
-    // 1. Ambil data fleet terbaru
-
+    // 1. Ambil data fleet terbaru dari GAS.
+    // Baca sebagai teks dulu agar HTTP error atau respons HTML bisa didiagnosis.
     const fleetResponse = await fetch(GAS_URL, {
-
       cache: "no-store",
-
+      redirect: "follow",
     });
 
+    const fleetResponseText = await fleetResponse.text();
+    const fleetContentType = fleetResponse.headers.get("content-type") || "unknown";
+
     if (!fleetResponse.ok) {
+      console.error("[P-CAR] GAS dashboard HTTP error", {
+        status: fleetResponse.status,
+        statusText: fleetResponse.statusText,
+        finalUrl: fleetResponse.url,
+        contentType: fleetContentType,
+        responsePreview: fleetResponseText.slice(0, 500),
+      });
 
-      throw new Error("Gagal mengambil data fleet dari GAS.");
-
+      throw new Error(
+        `Gagal mengambil data fleet dari GAS (HTTP ${fleetResponse.status} ${fleetResponse.statusText}). Periksa deployment dan akses Web App GAS.`
+      );
     }
 
-    const fleetData = await fleetResponse.json();
+    let fleetData: any;
+    try {
+      fleetData = JSON.parse(fleetResponseText);
+    } catch (parseError) {
+      console.error("[P-CAR] GAS dashboard bukan JSON", {
+        status: fleetResponse.status,
+        finalUrl: fleetResponse.url,
+        contentType: fleetContentType,
+        responsePreview: fleetResponseText.slice(0, 500),
+      });
+
+      throw new Error(
+        `GAS tidak mengembalikan JSON yang valid (HTTP ${fleetResponse.status}, content-type ${fleetContentType}). Buka URL dashboard_json langsung untuk memeriksa akses Web App.`
+      );
+    }
 
     if (
 
