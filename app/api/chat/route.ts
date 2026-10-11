@@ -1,11 +1,3 @@
-/**
- * P-CAR Fleet Assistant chat API.
- * Requires GEMINI_API_KEY and a deployed app/api/submit-request/route.ts.
- * Submit gateway uses server-only PCAR_GAS_WEBAPP_URL and PCAR_GAS_API_SECRET.
- */
-
-
-
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 import { checkFleetAvailability } from "@/lib/fleetHelper";
@@ -22,6 +14,22 @@ type ChatMessage = {
 
   content: string;
 
+};
+
+type FleetAvailableUnit = {
+  name: string;
+  driver?: string;
+  [key: string]: unknown;
+};
+
+type FleetUnavailableUnit = FleetAvailableUnit & {
+  reason?: string;
+};
+
+type FleetAvailabilityResult = {
+  available: FleetAvailableUnit[];
+  unavailable: FleetUnavailableUnit[];
+  [key: string]: unknown;
 };
 
 type Intent = {
@@ -498,7 +506,7 @@ ${message.trim()}
 
       passengers: intent.passengers ?? undefined,
 
-    });
+    }) as unknown as FleetAvailabilityResult;
 
     // 6. Jika unit sudah dipilih, validasi terhadap hasil backend
 
@@ -896,6 +904,3 @@ Minta user memilih unit untuk melanjutkan pembuatan draft.
   }
 
 }
-
-
-//add
