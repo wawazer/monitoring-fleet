@@ -2,9 +2,19 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { checkFleetAvailability } from "@/lib/fleetHelper";
 import { FLEET_SYSTEM_RULES } from "@/lib/fleetRules";
 
-const GAS_URL =
+function getGasDashboardUrl_(): string {
+  const configuredUrl = process.env.PCAR_GAS_WEBAPP_URL;
 
-  "https://script.google.com/macros/s/AKfycbxICLEfVFaYQdZydstk4kwmZHipDNvTSxB2xj1DwATX9wHAmCCW8FZQf9SiwxiEgtlOnQ/exec?action=dashboard_json";
+  if (!configuredUrl) {
+    throw new Error("PCAR_GAS_WEBAPP_URL belum dikonfigurasi di Vercel.");
+  }
+
+  const url = new URL(configuredUrl);
+  url.search = "";
+  url.hash = "";
+  url.searchParams.set("action", "dashboard_json");
+  return url.toString();
+}
 
 type ChatMessage = {
 
@@ -232,7 +242,8 @@ export async function POST(request: Request) {
 
     // 1. Ambil data fleet terbaru dari GAS.
     // Baca sebagai teks dulu agar HTTP error atau respons HTML bisa didiagnosis.
-    const fleetResponse = await fetch(GAS_URL, {
+    const gasDashboardUrl = getGasDashboardUrl_();
+    const fleetResponse = await fetch(gasDashboardUrl, {
       cache: "no-store",
       redirect: "follow",
     });
