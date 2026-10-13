@@ -1,10 +1,3 @@
-/**
- * P-CAR Fleet Assistant chat API.
- * Requires GEMINI_API_KEY and a deployed app/api/submit-request/route.ts.
- * Submit gateway uses server-only PCAR_GAS_WEBAPP_URL and PCAR_GAS_API_SECRET.
- */
-
-
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
@@ -12,22 +5,20 @@ import { checkFleetAvailability } from "@/lib/fleetHelper";
 
 import { FLEET_SYSTEM_RULES } from "@/lib/fleetRules";
 
-/**
- * Gunakan satu URL Web App GAS dari Vercel Environment Variables.
- * Nilai PCAR_GAS_WEBAPP_URL harus URL deployment aktif yang berakhir /exec.
- * Query action=dashboard_json ditambahkan khusus untuk membaca dashboard.
- */
+
 function getGasDashboardUrl_(): string {
   const configuredUrl = process.env.PCAR_GAS_WEBAPP_URL;
 
   if (!configuredUrl) {
-    throw new Error("https://script.google.com/macros/s/AKfycbxICLEfVFaYQdZydstk4kwmZHipDNvTSxB2xj1DwATX9wHAmCCW8FZQf9SiwxiEgtlOnQ/exec");
+    throw new Error("PCAR_GAS_WEBAPP_URL belum dikonfigurasi di Vercel.");
   }
 
   const url = new URL(configuredUrl);
   url.search = "";
   url.hash = "";
   url.searchParams.set("action", "dashboard_json");
+
+  url.searchParams.set("days", "30");
   return url.toString();
 }
 
@@ -255,7 +246,7 @@ export async function POST(request: Request) {
 
     }
 
-    // 1. Ambil data fleet terbaru dari GAS.
+    // Ambil data fleet terbaru dari GAS.
     // Baca sebagai teks dulu agar HTTP error atau respons HTML bisa didiagnosis.
     const gasDashboardUrl = getGasDashboardUrl_();
     const fleetResponse = await fetch(gasDashboardUrl, {
@@ -312,11 +303,13 @@ export async function POST(request: Request) {
 
     const genAI = new GoogleGenerativeAI(apiKey);
 
-    const model = genAI.getGenerativeModel({
-
-      model: "gemini-3.5-flash-lite",
-
-    });
+    const model = genAI.getGenerativeModel(
+      {
+        model: "gemini-3.5-flash-lite",
+        generationConfig: { maxOutputTokens: 512 },
+      },
+      { timeout: 25000 }
+    );
 
     // 2. Pahami pesan berdasarkan seluruh percakapan
 
@@ -351,6 +344,8 @@ Aturan:
 - "Jam 9 pagi" berarti 09:00.
 
 - Jika user memilih "nomor 1", cocokkan dengan rekomendasi kendaraan
+
+- wajib menanyakan tanggal dan kembali unit
 
   yang benar-benar muncul dalam transkrip. Jangan mengarang unit.
 
@@ -436,7 +431,6 @@ Balas HANYA JSON valid:
 
     const intent = parseJson(intentResult.response.text());
 
-    // 3. Pesan biasa tidak harus memulai proses pencarian
 
     if (!intent.isFleetRequest) {
 
@@ -540,7 +534,6 @@ ${message.trim()}
 
     }
 
-    // 5. Backend memeriksa ketersediaan secara deterministik
 
     const availability = checkFleetAvailability(fleetData, {
 
@@ -660,7 +653,7 @@ ${message.trim()}
           reply: [
             `Unit ${selected.name} tersedia untuk jadwal yang dipilih.`,
             `Untuk melanjutkan pengajuan, kirim data berikut dalam satu pesan: ${missingApplicantFields.join(", ")}.`,
-            "Gunakan pilihan tipe perjalanan yang berlaku di P-CAR. Perjalanan Dinas, Keperluan Internal (Tanpa SPPD) dan Urgent. Jika URGENT, sertakan alasannya.",
+            "Gunakan pilihan tipe perjalanan yang berlaku di P-CAR. Jika URGENT, sertakan alasannya.",
             "Untuk perjalanan dinas, sertakan dasar/nomor SPPD.",
             "Jika ada, sertakan daftar tamu, hotel, dan link HTTPS file SPPD.",
             "Data identitas akan diperiksa admin sebelum pengajuan diteruskan ke approval."
@@ -847,82 +840,48 @@ ${
 
     }
 
-    // 9. Belum memilih unit: jelaskan hasil pencarian backend
+    // 9. Belum memilih unit: jawab langsung dari hasil backend.
+    // Menghindari panggilan Gemini kedua agar pencarian kendaraan lebih cepat.
+    const recommendations = availability.available.slice(0, 10);
+    const checkedText = `Jadwal yang dicek: ${intent.startDate} ${intent.startTime}–${endDate} ${endTime}.`;
+    const durationNote = assumedOneHour
+      ? "Catatan: jam kembali diasumsikan satu jam setelah berangkat."
+      : "";
 
-    const answerPrompt = `
+    let availabilityReply: string;
+    if (recommendations.length === 0) {
+      availabilityReply = [
+        `Maaf, tidak ada kendaraan yang tersedia untuk jadwal tersebut.`,
+        checkedText,
+        durationNote,
+        "Coba ubah jam atau tanggal, atau periksa kembali jumlah penumpang."
+      ].filter(Boolean).join("\n\n");
+    } else {
+      const recommendationText = recommendations.map((unit, index) =>
+        `${index + 1}. ${unit.name}${unit.driver ? ` — driver ${unit.driver}` : ""}`
+      ).join("\n");
 
-${FLEET_SYSTEM_RULES}
-
-Hasil pengecekan backend adalah sumber kebenaran.
-
-Jangan menambahkan kendaraan yang tidak tercantum di available.
-
-Jangan menyebut booking sudah dibuat.
-
-Permintaan:
-
-${JSON.stringify({
-
-  startDate: intent.startDate,
-
-  startTime: intent.startTime,
-
-  endDate,
-
-  endTime,
-
-  passengers: intent.passengers,
-
-  assumedOneHour,
-
-})}
-
-Hasil backend:
-
-${JSON.stringify(availability, null, 2)}
-
-Pertanyaan user:
-
-${message.trim()}
-
-Jawab dalam Bahasa Indonesia yang ramah.
-
-Berikan maksimal 5 rekomendasi unit yang tersedia.
-
-Sebutkan driver dan kapasitas hanya jika diketahui.
-
-Jelaskan jika jam kembali merupakan asumsi.
-
-Minta user memilih unit untuk melanjutkan pembuatan draft.
-
-`;
-
-    const answerResult = await model.generateContent(answerPrompt);
+      availabilityReply = [
+        `Berikut kendaraan yang tersedia untuk jadwal kamu:`,
+        checkedText,
+        recommendationText,
+        durationNote,
+        "Pilih nomor atau tuliskan nama kendaraan untuk melanjutkan draft pengajuan."
+      ].filter(Boolean).join("\n\n");
+    }
 
     return Response.json({
-
       success: true,
-
-      reply: answerResult.response.text(),
-
+      reply: availabilityReply,
       checked: {
-
         startDate: intent.startDate,
-
         startTime: intent.startTime,
-
         endDate,
-
         endTime,
-
         passengers: intent.passengers,
-
         assumedOneHour,
-
       },
-
       updated_at: fleetData.updated_at,
-
     });
 
   } catch (error) {
