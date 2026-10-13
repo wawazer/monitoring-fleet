@@ -842,7 +842,8 @@ ${
 
     // 9. Belum memilih unit: jawab langsung dari hasil backend.
     // Menghindari panggilan Gemini kedua agar pencarian kendaraan lebih cepat.
-    const recommendations = availability.available.slice(0, 10);
+    // const recommendations = availability.available.slice(0, 10);
+        const recommendations = availability.available;
     const checkedText = `Jadwal yang dicek: ${intent.startDate} ${intent.startTime}–${endDate} ${endTime}.`;
     const durationNote = assumedOneHour
       ? "Catatan: jam kembali diasumsikan satu jam setelah berangkat."
