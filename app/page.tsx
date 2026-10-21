@@ -198,11 +198,18 @@ const response = await fetch("/api/chat", {
     }
   };
 
-  const suggestions = [
-    "Mobil apa yang tersedia besok?",
-    "Cari mobil untuk 8 orang.",
-    "Cek jadwal kendaraan tanggal 14 Oktober.",
-  ];
+  const todaySuggesntions = new Intl.DateTimeFormat("id-ID", {
+  timeZone: "Asia/Jakarta",
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+}).format(new Date());
+
+const suggestions = [
+  "Mobil apa yang tersedia besok?",
+  "Cari mobil untuk 8 orang.",
+  `Cek jadwal kendaraan hari ini (${todaySuggesntions}).`,
+];
 
   if (!data) {
     return (
