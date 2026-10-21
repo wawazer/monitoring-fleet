@@ -195,9 +195,31 @@ function addOneHour(date: string, time: string) {
 }
 
 function normalize(value: unknown) {
-
   return String(value ?? "").trim().toLowerCase();
+}
 
+/** Mengenali permintaan agar AI memilihkan kendaraan dari daftar sebelumnya. */
+function isAutoPickRequest(message: string): boolean {
+  const normalized = String(message || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return /\bpilih\s*kan\b/.test(normalized) ||
+    /\bpilihin\b/.test(normalized) ||
+    /\bpilih (salah satu|yang cocok|yang sesuai|yang terbaik|yang tersedia)\b/.test(normalized) ||
+    /\bterserah\b.*\b(pilih|pilihin|pilihkan)\b/.test(normalized) ||
+    /\b(kamu|anda)\s+(saja\s+)?pilih\b/.test(normalized);
+}
+
+function hasRecentVehicleRecommendations(history: ChatMessage[]): boolean {
+  return history.some((item) =>
+    item.role === "assistant" &&
+    /berikut kendaraan yang tersedia|kendaraan yang tersedia untuk jadwal|pilih nomor atau tuliskan nama kendaraan/i.test(item.content)
+  );
 }
 
 export async function POST(request: Request) {
@@ -344,6 +366,10 @@ Aturan:
 - "Jam 9 pagi" berarti 09:00.
 
 - Jika user memilih "nomor 1", cocokkan dengan rekomendasi kendaraan
+  yang benar-benar muncul dalam transkrip. Jangan mengarang unit.
+- Jika pesan user terbaru hanya meminta AI memilihkan (misalnya "pilih kan",
+  "pilihkan", atau "pilih yang cocok") tanpa menyebut nomor/nama unit,
+  biarkan selectedVehicle null. Backend akan memilih unit yang tersedia.
 
 - wajib menanyakan tanggal dan kembali unit
 
@@ -549,15 +575,27 @@ ${message.trim()}
 
     }) as unknown as FleetAvailabilityResult;
 
-    // 6. Jika unit sudah dipilih, validasi terhadap hasil backend
+    // Kalau user menulis "pilih kan" setelah menerima daftar kendaraan,
+    // pilih unit pertama yang masih tersedia berdasarkan hasil backend terbaru.
+    // Pengecekan ketersediaan/kapasitas tetap berasal dari checkFleetAvailability.
+    const autoPickRequested =
+      !intent.selectedVehicle &&
+      isAutoPickRequest(message) &&
+      hasRecentVehicleRecommendations(history);
+    const effectiveSelectedVehicle = intent.selectedVehicle ||
+      (autoPickRequested ? availability.available[0]?.name || null : null);
+    const assistantSelectedVehicle = Boolean(
+      autoPickRequested && effectiveSelectedVehicle
+    );
 
-    if (intent.selectedVehicle) {
+    // 6. Jika unit dipilih oleh user atau diminta agar AI memilihkan, validasi ulang.
+    if (effectiveSelectedVehicle) {
 
       const selected = availability.available.find(
 
         (unit: any) =>
 
-          normalize(unit.name) === normalize(intent.selectedVehicle)
+          normalize(unit.name) === normalize(effectiveSelectedVehicle)
 
       );
 
@@ -567,7 +605,7 @@ ${message.trim()}
 
           (unit: any) =>
 
-            normalize(unit.name) === normalize(intent.selectedVehicle)
+            normalize(unit.name) === normalize(effectiveSelectedVehicle)
 
         );
 
@@ -597,7 +635,9 @@ ${message.trim()}
 
           selected_vehicle: selected.name,
 
-          reply: `Baik, kamu memilih ${selected.name}, dengan driver ${selected.driver}. Untuk menyiapkan draft pengajuan, tujuan perjalanannya ke mana?`,
+          reply: assistantSelectedVehicle
+            ? `Sesuai permintaanmu, saya pilihkan ${selected.name}, dengan driver ${selected.driver || "belum tercatat"}. Unit ini tersedia untuk jadwal ${intent.startDate} pukul ${intent.startTime} sampai ${endDate} pukul ${endTime}. Untuk menyiapkan draft pengajuan, tujuan perjalanannya ke mana?`
+            : `Baik, kamu memilih ${selected.name}, dengan driver ${selected.driver || "belum tercatat"}. Untuk menyiapkan draft pengajuan, tujuan perjalanannya ke mana?`,
 
         });
 
@@ -613,7 +653,9 @@ ${message.trim()}
 
           selected_vehicle: selected.name,
 
-          reply: `Tujuan perjalanan: ${intent.destination}. Apa keperluan atau perihal perjalanan tersebut?`,
+          reply: assistantSelectedVehicle
+            ? `Saya sudah memilihkan ${selected.name} untuk jadwal tersebut. Tujuan perjalanan: ${intent.destination}. Apa keperluan atau perihal perjalanan tersebut?`
+            : `Tujuan perjalanan: ${intent.destination}. Apa keperluan atau perihal perjalanan tersebut?`,
 
         });
 
@@ -651,7 +693,9 @@ ${message.trim()}
           draft_status: "collecting_applicant_details",
           selected_vehicle: selected.name,
           reply: [
-            `Unit ${selected.name} tersedia untuk jadwal yang dipilih.`,
+            assistantSelectedVehicle
+              ? `Sesuai permintaanmu, saya memilih ${selected.name}. Unit ini tersedia untuk jadwal yang dipilih.`
+              : `Unit ${selected.name} tersedia untuk jadwal yang dipilih.`,
             `Untuk melanjutkan pengajuan, kirim data berikut dalam satu pesan: ${missingApplicantFields.join(", ")}.`,
             "Gunakan pilihan tipe perjalanan yang berlaku di P-CAR. Jika URGENT, sertakan alasannya.",
             "Untuk perjalanan dinas, sertakan dasar/nomor SPPD.",
