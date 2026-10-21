@@ -667,21 +667,43 @@ ${message.trim()}
 
     // 4. Minta detail waktu jika belum lengkap
 
-    if (!validDate(intent.startDate) || !validTime(intent.startTime)) {
+    
+    // 4. Minta hanya informasi yang benar-benar belum lengkap.
+    if (!validDate(intent.startDate)) {
+      return Response.json({
+        success: true,
+        needs_clarification: true,
+        reply: "Tanggal berangkatnya tanggal berapa?"
+      });
+    }
+
+    const hasMultiDayRange =
+      validDate(intent.endDate) &&
+      intent.endDate !== intent.startDate;
+
+    // Jika tanggal sudah diketahui, jangan tanyakan tanggal lagi.
+    if (!validTime(intent.startTime)) {
+      const reply = hasMultiDayRange
+        ? `Saya catat perjalanan dari ${intent.startDate} sampai ${intent.endDate}. Jam berangkat pada ${intent.startDate} pukul berapa, dan jam kembali pada ${intent.endDate} pukul berapa?`
+        : `Tanggal berangkat ${intent.startDate} sudah dicatat. Jam berapa kendaraan akan berangkat?`;
 
       return Response.json({
-
         success: true,
-
         needs_clarification: true,
-
-        reply:
-
-          "Baik, saya bantu. Tanggal dan jam berapa kendaraan akan berangkat?",
-
+        reply
       });
-
     }
+
+    // Untuk perjalanan beberapa hari, jangan mengasumsikan
+    // waktu kembali satu jam setelah berangkat.
+    if (hasMultiDayRange && !validTime(intent.endTime)) {
+      return Response.json({
+        success: true,
+        needs_clarification: true,
+        reply: `Saya catat berangkat tanggal ${intent.startDate} pukul ${intent.startTime} dan kembali tanggal ${intent.endDate}. Jam berapa kendaraan akan kembali pada tanggal ${intent.endDate}?`
+      });
+    }
+
 
     const assumedOneHour = !intent.endTime;
 

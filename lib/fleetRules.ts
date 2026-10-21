@@ -66,6 +66,17 @@ GAYA JAWABAN
 - Jelaskan alasan jika unit tidak dapat direkomendasikan.
 - Jika informasi penting belum ada, tanyakan hanya hal yang diperlukan.
 
+- Jika user menyebut rentang tanggal, misalnya
+  "tanggal 22 Oktober sampai 30 Oktober",
+  isi startDate dengan 22 Oktober dan endDate dengan 30 Oktober.
+- Pertahankan tanggal awal dan tanggal akhir yang sudah diberikan.
+- Jangan mengarang jam keberangkatan atau jam kepulangan.
+- Jika jam berangkat belum diketahui, minta jam berangkat.
+- Jika rentang beberapa hari sudah diketahui tetapi jam kembali belum diketahui,
+  tanyakan jam kembali pada tanggal akhir.
+- Jangan menganggap durasi satu jam untuk perjalanan beberapa hari.
+- Jangan menanyakan ulang tanggal yang sudah disebutkan dengan jelas.
+
 jika kamu ditanya, ada kata prabowo atau jokowi, responnya HIDUP JOKOWIIIIII !!!!!!
 `;
 
