@@ -14,6 +14,10 @@ function jsonError(error: string, status: number) {
   return Response.json({ ok: false, error }, { status });
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function POST(request: Request) {
   try {
     const secret = process.env.PCAR_GAS_API_SECRET;
@@ -24,7 +28,6 @@ export async function POST(request: Request) {
       return jsonError("Konfigurasi server belum siap.", 500);
     }
 
-    // Endpoint ini hanya boleh dipanggil dari route server /api/chat.
     if (!providedSecret || providedSecret !== secret) {
       return jsonError("Akses tidak diizinkan.", 401);
     }
@@ -43,17 +46,9 @@ export async function POST(request: Request) {
     }
 
     const requiredFields = [
-      "name",
-      "nipp",
-      "email",
-      "whatsapp",
-      "department",
-      "startDateTime",
-      "endDateTime",
-      "vehicle",
-      "destination",
-      "tripType",
-      "loanType",
+      "name", "nipp", "email", "whatsapp", "department",
+      "startDateTime", "endDateTime", "vehicle", "destination",
+      "tripType", "loanType",
     ];
 
     const missingFields = requiredFields.filter((field) => {
@@ -63,84 +58,103 @@ export async function POST(request: Request) {
 
     if (missingFields.length > 0) {
       return Response.json(
-        {
-          ok: false,
-          error: "Data pengajuan belum lengkap.",
-          missingFields,
-        },
+        { ok: false, error: "Data pengajuan belum lengkap.", missingFields },
         { status: 400 }
       );
     }
 
-    // Gunakan URL deployment GAS tanpa query string action=dashboard_json.
     const gasUrl = new URL(gasUrlValue);
     gasUrl.search = "";
     gasUrl.hash = "";
 
-    const gasResponse = await fetch(gasUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "text/plain;charset=utf-8",
-      },
-      body: JSON.stringify({
-        action: "submit_ai_request",
-        apiSecret: secret,
-        data,
-      }),
-      cache: "no-store",
-      redirect: "follow",
+    const gasPayload = JSON.stringify({
+      action: "submit_ai_request",
+      apiSecret: secret,
+      data,
     });
 
-    const responseText = await gasResponse.text();
-    const gasContentType = gasResponse.headers.get("content-type") || "unknown";
-    let result: GASSubmitResult;
+    let lastDiagnostic = "Respons GAS tidak tersedia.";
 
-    try {
-      result = JSON.parse(responseText) as GASSubmitResult;
-    } catch {
-      // Jangan menampilkan isi respons mentah ke browser karena respons HTML
-      // bisa berisi detail teknis. Simpan cuplikan terbatas di Vercel Logs.
-      const responsePreview = responseText.replace(/\s+/g, " ").slice(0, 400);
-      console.error("[P-CAR] GAS mengembalikan respons non-JSON", {
-        status: gasResponse.status,
-        statusText: gasResponse.statusText,
-        contentType: gasContentType,
-        finalUrl: gasResponse.url,
-        responsePreview,
-      });
+    // ContentService GAS memakai redirect ke script.googleusercontent.com.
+    // Respons HTML/redirect yang gagal dicoba ulang terbatas. Handler GAS
+    // memiliki deduplikasi untuk pengajuan AI identik agar retry tidak membuat
+    // baris duplikat pada kondisi normal.
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let gasResponse: Response | null = null;
+      let responseText = "";
+      let contentType = "unknown";
 
-      let hint = "Periksa Vercel Function Logs dan deployment Web App GAS.";
-      if (/script function not found.*doPost/i.test(responseText)) {
-        hint = "Versi Web App GAS yang aktif belum memiliki doPost(e). Deploy New version.";
-      } else if (/accounts\.google\.com|sign in|signin|login/i.test(responseText)) {
-        hint = "GAS meminta login; periksa akses Web App agar dapat diakses siapa saja sesuai kebijakan aplikasi.";
-      } else if (/exception|error|not found/i.test(responseText)) {
-        hint = "GAS mengembalikan halaman error; periksa cuplikan respons di Vercel Function Logs.";
+      try {
+        gasResponse = await fetch(gasUrl, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: gasPayload,
+          cache: "no-store",
+          redirect: "follow",
+        });
+        responseText = await gasResponse.text();
+        contentType = gasResponse.headers.get("content-type") || "unknown";
+
+        let result: GASSubmitResult | null = null;
+        try {
+          result = JSON.parse(responseText) as GASSubmitResult;
+        } catch {
+          result = null;
+        }
+
+        if (result) {
+          if (!gasResponse.ok || !result.ok) {
+            // Ini respons JSON aplikasi yang eksplisit, bukan masalah redirect;
+            // jangan mengulang agar tidak mengubah interpretasi error bisnis.
+            return Response.json(
+              { ok: false, error: result.error || "Pengajuan gagal diproses oleh GAS." },
+              { status: 502 }
+            );
+          }
+
+          return Response.json({
+            ok: true,
+            row: result.row,
+            status: result.status,
+            duplicate: result.duplicate ?? false,
+            message: result.message,
+          });
+        }
+
+        const responsePreview = responseText.replace(/\s+/g, " ").slice(0, 400);
+        lastDiagnostic = `HTTP ${gasResponse.status}; ${contentType}; URL ${gasResponse.url || gasUrl.toString()}`;
+        console.error("[P-CAR] GAS respons non-JSON", {
+          attempt,
+          maxAttempts,
+          status: gasResponse.status,
+          statusText: gasResponse.statusText,
+          contentType,
+          redirected: gasResponse.redirected,
+          finalUrl: gasResponse.url,
+          responsePreview,
+        });
+      } catch (fetchError) {
+        lastDiagnostic = String(fetchError instanceof Error ? fetchError.message : fetchError);
+        console.error("[P-CAR] Fetch GAS gagal", { attempt, maxAttempts, error: lastDiagnostic });
       }
 
-      return jsonError(
-        `GAS tidak mengembalikan JSON (HTTP ${gasResponse.status}; ${gasContentType}). ${hint}`,
-        502
-      );
+      if (attempt < maxAttempts) {
+        await sleep(attempt === 1 ? 800 : 1600);
+      }
     }
 
-    if (!gasResponse.ok || !result.ok) {
-      return Response.json(
-        {
-          ok: false,
-          error: result.error || "Pengajuan gagal diproses oleh GAS.",
-        },
-        { status: 502 }
-      );
-    }
-
-    return Response.json({
-      ok: true,
-      row: result.row,
-      status: result.status,
-      duplicate: result.duplicate ?? false,
-      message: result.message,
-    });
+    // Jangan mengklaim pengajuan pasti gagal: GAS mungkin sudah menulis baris
+    // sebelum respons JSON gagal dikirim. Pemohon/admin perlu cek Request Mobil.
+    return Response.json(
+      {
+        ok: false,
+        uncertain: true,
+        error: "GAS belum mengembalikan respons JSON setelah 3 percobaan. Pengajuan mungkin sudah tercatat; periksa Request Mobil sebelum mencoba lagi.",
+        diagnostic: lastDiagnostic,
+      },
+      { status: 502 }
+    );
   } catch (error) {
     console.error("P-CAR submit gateway error:", error);
     return jsonError("Terjadi kesalahan saat mengirim pengajuan ke P-CAR.", 500);
