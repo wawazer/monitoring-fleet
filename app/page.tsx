@@ -198,17 +198,41 @@ const response = await fetch("/api/chat", {
     }
   };
 
-  const todaySuggesntions = new Intl.DateTimeFormat("id-ID", {
-  timeZone: "Asia/Jakarta",
-  day: "numeric",
-  month: "long",
-  year: "numeric",
-}).format(new Date());
+ const suggestionNow = new Date();
+const suggestionEnd = new Date(
+  suggestionNow.getTime() + 60 * 60 * 1000
+);
+
+const formatJakartaDateTime = (date: Date) => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+
+  const get = (type: string) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+
+  return {
+    date: `${get("year")}-${get("month")}-${get("day")}`,
+    time: `${get("hour")}:${get("minute")}`,
+  };
+};
+
+const suggestionStartDT =
+  formatJakartaDateTime(suggestionNow);
+
+const suggestionEndDT =
+  formatJakartaDateTime(suggestionEnd);
 
 const suggestions = [
   "Mobil apa yang tersedia besok?",
   "Cari mobil untuk 8 orang.",
-  `Cek jadwal kendaraan hari ini (${todaySuggesntions}).`,
+  `Cek kendaraan yang tersedia sekarang: ${suggestionStartDT.date} pukul ${suggestionStartDT.time} sampai ${suggestionEndDT.date} pukul ${suggestionEndDT.time}.`,
 ];
 
   if (!data) {
