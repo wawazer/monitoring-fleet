@@ -211,15 +211,158 @@ function isAutoPickRequest(message: string): boolean {
   return /\bpilih\s*kan\b/.test(normalized) ||
     /\bpilihin\b/.test(normalized) ||
     /\bpilih (salah satu|yang cocok|yang sesuai|yang terbaik|yang tersedia)\b/.test(normalized) ||
+    /\bcarikan (yang|yg) (ada|cocok|sesuai|tersedia)\b/.test(normalized) ||
     /\bterserah\b.*\b(pilih|pilihin|pilihkan)\b/.test(normalized) ||
     /\b(kamu|anda)\s+(saja\s+)?pilih\b/.test(normalized);
 }
 
+function isExplicitNewFleetSearch(message: string): boolean {
+  const normalized = String(message || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return /\b(mobil apa|cari mobil|carikan mobil|cari kendaraan|carikan kendaraan|cek jadwal|cek kendaraan|kendaraan apa yang tersedia|mobil apa yang tersedia|jadwal kendaraan)\b/.test(normalized);
+}
+
 function hasRecentVehicleRecommendations(history: ChatMessage[]): boolean {
-  return history.some((item) =>
-    item.role === "assistant" &&
-    /berikut kendaraan yang tersedia|kendaraan yang tersedia untuk jadwal|pilih nomor atau tuliskan nama kendaraan/i.test(item.content)
-  );
+  const lastAssistant = [...history].reverse().find((item) => item.role === "assistant");
+  return Boolean(lastAssistant &&
+    /berikut kendaraan yang tersedia|kendaraan yang tersedia untuk jadwal|pilih nomor atau tuliskan nama kendaraan/i.test(lastAssistant.content));
+}
+
+/** Rekonstruksi pilihan unit dari percakapan tanpa bergantung sepenuhnya pada Gemini. */
+function inferSelectedVehicleFromHistory(history: ChatMessage[]): string | null {
+  let selectedVehicle: string | null = null;
+  let latestRecommendations: string[] = [];
+
+  const parseRecommendationLines = (content: string): string[] => {
+    if (!/berikut kendaraan yang tersedia|kendaraan yang tersedia untuk jadwal|pilih nomor atau tuliskan nama kendaraan/i.test(content)) return [];
+    return content.split(/\r?\n/)
+      .map((line) => {
+        const entry = line.match(/^\s*\d{1,2}\.\s*(.+)$/);
+        if (!entry) return null;
+        return entry[1]
+          .replace(/\*+/g, "")
+          .split(/\s+[—–-]\s+driver\b/i)[0]
+          .split(/\s*\(driver\s*:/i)[0]
+          .trim();
+      })
+      .filter((name): name is string => Boolean(name));
+  };
+
+  for (const item of history) {
+    if (item.role === "user") {
+      if (isExplicitNewFleetSearch(item.content)) {
+        selectedVehicle = null;
+        latestRecommendations = [];
+        continue;
+      }
+      const choice = item.content.toLowerCase().match(/\b(?:nomor|no\.?|pilihan|pilih)\s*(?:ke[- ]?)?(\d{1,2})\b/);
+      if (choice && latestRecommendations.length) {
+        const index = Number(choice[1]) - 1;
+        if (index >= 0 && index < latestRecommendations.length) selectedVehicle = latestRecommendations[index];
+      }
+      continue;
+    }
+
+    const listed = parseRecommendationLines(item.content);
+    if (listed.length) latestRecommendations = listed;
+
+    const patterns = [
+      /(?:kamu memilih|saya pilihkan|saya memilihkan|saya memilih|saya sudah memilih)\s+(.+?)(?=,\s*(?:dengan\s+driver|driver)\b|\.\s|\n|$)/i,
+      /(?:^|\n)\s*(?:unit|kendaraan yang dipilih)\s*:\s*(.+?)\s*(?:\n|$)/i,
+      /\bunit\s+(.+?)\s+tersedia untuk jadwal\b/i,
+    ];
+    for (const pattern of patterns) {
+      const match = item.content.match(pattern);
+      if (!match?.[1]) continue;
+      const candidate = match[1]
+        .replace(/\*+/g, "")
+        .split(/\s+[—–-]\s+driver\b/i)[0]
+        .split(/\s*\(driver\s*:/i)[0]
+        .trim();
+      if (candidate && !/^(ini|tersebut|yang dipilih)$/i.test(candidate)) selectedVehicle = candidate;
+      break;
+    }
+  }
+  return selectedVehicle;
+}
+
+function inferReplyToPromptFromHistory(
+  history: ChatMessage[],
+  field: "destination" | "purpose"
+): string | null {
+  const promptPattern = field === "destination"
+    ? /tujuan perjalanan(?:nya)? ke mana/i
+    : /apa keperluan(?: atau perihal)? perjalanan|keperluan atau perihal perjalanan/i;
+  let waitingForAnswer = false;
+  let answer: string | null = null;
+
+  for (const item of history) {
+    if (item.role === "assistant") {
+      if (promptPattern.test(item.content)) waitingForAnswer = true;
+      continue;
+    }
+    if (waitingForAnswer) {
+      const candidate = item.content.trim();
+      if (candidate) answer = candidate;
+      waitingForAnswer = false;
+    }
+  }
+  return answer;
+}
+
+function isContinuingDraftFromHistory(history: ChatMessage[], currentMessage: string): boolean {
+  if (isExplicitNewFleetSearch(currentMessage)) return false;
+  const lastAssistant = [...history].reverse().find(item => item.role === "assistant");
+  const draftPromptPattern = /tujuan perjalanan(?:nya)? ke mana|apa keperluan(?: atau perihal)? perjalanan|kirim data berikut|data identitas akan diperiksa|untuk melanjutkan pengajuan|berikut draft pengajuan|balas konfirmasi/i;
+  if (lastAssistant && draftPromptPattern.test(lastAssistant.content)) return true;
+
+  const recent = history.slice(-12);
+  const hadDraftPrompt = recent.some(item => item.role === "assistant" && draftPromptPattern.test(item.content));
+  const hadSelectedVehicle = Boolean(inferSelectedVehicleFromHistory(history));
+  return hadDraftPrompt && hadSelectedVehicle;
+}
+
+/** Jika user memilih "nomor N", cocokkan dengan daftar rekomendasi terakhir. */
+function inferVehicleFromNumberChoice(
+  history: ChatMessage[],
+  message: string
+): string | null {
+  const match = String(message || "").toLowerCase().match(/\b(?:nomor|no\.?|pilihan|pilih)\s*(?:ke[- ]?)?(\d{1,2})\b/);
+  if (!match) return null;
+  const wanted = Number(match[1]);
+
+  for (let i = history.length - 1; i >= 0; i--) {
+    const item = history[i];
+    if (item.role !== "assistant" || !/kendaraan yang tersedia|pilih nomor atau tuliskan nama kendaraan/i.test(item.content)) continue;
+    for (const line of item.content.split(/\r?\n/)) {
+      const entry = line.match(/^\s*(\d{1,2})\.\s*(.+)$/);
+      if (!entry || Number(entry[1]) !== wanted) continue;
+      const vehicle = entry[2]
+        .replace(/\*+/g, "")
+        .split(/\s+[—–-]\s+driver\b/i)[0]
+        .split(/\s*\(driver\s*:/i)[0]
+        .trim();
+      return vehicle || null;
+    }
+  }
+  return null;
+}
+
+function inferVehicleNamedInMessage(
+  message: string,
+  units: FleetAvailableUnit[]
+): string | null {
+  const text = normalize(message);
+  const matches = units
+    .filter(unit => unit.name && text.includes(normalize(unit.name)))
+    .sort((a, b) => b.name.length - a.name.length);
+  return matches[0]?.name || null;
 }
 
 export async function POST(request: Request) {
@@ -370,6 +513,11 @@ Aturan:
 - Jika pesan user terbaru hanya meminta AI memilihkan (misalnya "pilih kan",
   "pilihkan", atau "pilih yang cocok") tanpa menyebut nomor/nama unit,
   biarkan selectedVehicle null. Backend akan memilih unit yang tersedia.
+- Jika sebelumnya AI sudah menyatakan unit yang dipilih, pertahankan unit itu
+  selama percakapan sedang mengumpulkan tujuan, keperluan, atau identitas pemohon.
+  Jangan kembali ke daftar rekomendasi hanya karena pesan terbaru berisi data pemohon.
+- Pertahankan tujuan dan keperluan yang sudah dijawab. Jangan menafsirkan kembali
+  jawaban tujuan/keperluan sebagai permintaan pencarian armada baru.
 
 - wajib menanyakan tanggal dan kembali unit
 
@@ -456,6 +604,39 @@ Balas HANYA JSON valid:
     const intentResult = await model.generateContent(intentPrompt);
 
     const intent = parseJson(intentResult.response.text());
+
+    // Fallback deterministik: jangan biarkan Gemini melupakan kendaraan yang
+    // sudah dipilih ketika user menjawab tujuan, keperluan, atau data pemohon.
+    const continuingDraft = isContinuingDraftFromHistory(history, message);
+    const numberedChoice = inferVehicleFromNumberChoice(history, message);
+    const typedVehicle = inferVehicleNamedInMessage(message, fleetData.units);
+    const previousSelectedVehicle = continuingDraft ? inferSelectedVehicleFromHistory(history) : null;
+    const autoPickNow = isAutoPickRequest(message) && hasRecentVehicleRecommendations(history);
+
+    if (autoPickNow) {
+      // Permintaan pilihkan baru harus memakai hasil ketersediaan terbaru dari backend.
+      intent.selectedVehicle = null;
+    } else if (continuingDraft && previousSelectedVehicle && !numberedChoice && !typedVehicle) {
+      // Pada lanjutan draft, pilihan historis lebih tepercaya daripada tebakan model.
+      intent.selectedVehicle = previousSelectedVehicle;
+    } else if (!intent.selectedVehicle) {
+      intent.selectedVehicle = numberedChoice || typedVehicle || previousSelectedVehicle;
+    }
+
+    if (continuingDraft) {
+      const lastAssistant = [...history].reverse().find(item => item.role === "assistant");
+      if (!intent.destination && lastAssistant && /tujuan perjalanan(?:nya)? ke mana/i.test(lastAssistant.content)) {
+        intent.destination = message.trim();
+      } else if (!intent.destination) {
+        intent.destination = inferReplyToPromptFromHistory(history, "destination");
+      }
+      if (!intent.purpose && lastAssistant && /apa keperluan(?: atau perihal)? perjalanan|keperluan atau perihal perjalanan/i.test(lastAssistant.content)) {
+        intent.purpose = message.trim();
+      } else if (!intent.purpose) {
+        intent.purpose = inferReplyToPromptFromHistory(history, "purpose");
+      }
+      intent.isFleetRequest = true;
+    }
 
 
     if (!intent.isFleetRequest) {
