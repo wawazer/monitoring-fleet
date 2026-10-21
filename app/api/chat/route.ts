@@ -473,7 +473,7 @@ export async function POST(request: Request) {
         model: "gemini-3.5-flash-lite",
         generationConfig: { maxOutputTokens: 512 },
       },
-      { timeout: 25000 }
+      { timeout: 45000 }
     );
 
     // 2. Pahami pesan berdasarkan seluruh percakapan
