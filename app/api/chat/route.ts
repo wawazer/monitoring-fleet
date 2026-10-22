@@ -477,10 +477,19 @@ ${message.trim()}
     // 4. Minta detail keberangkatan yang belum lengkap.
     // Jangan menanyakan ulang tanggal atau jam yang sudah diberikan dengan jelas.
 
-    const startDateMissing = !validDate(intent.startDate);
-    const startTimeMissing = !validTime(intent.startTime);
+    // Buat variabel baru yang bertipe string setelah validasi.
+    // Pemeriksaan melalui boolean terpisah tidak selalu membuat TypeScript
+    // mempersempit tipe intent.startDate/startTime dari string | null.
+    const startDate = validDate(intent.startDate)
+      ? intent.startDate
+      : null;
+    const startTime = validTime(intent.startTime)
+      ? intent.startTime
+      : null;
 
-    if (startDateMissing || startTimeMissing) {
+    if (startDate === null || startTime === null) {
+      const startDateMissing = startDate === null;
+      const startTimeMissing = startTime === null;
       let clarification = "";
 
       if (startDateMissing && startTimeMissing) {
@@ -488,7 +497,7 @@ ${message.trim()}
       } else if (startDateMissing) {
         clarification = "Tanggal berapa kendaraan akan berangkat?";
       } else {
-        clarification = `Untuk keberangkatan tanggal ${intent.startDate}, jam berapa kendaraan mulai digunakan?`;
+        clarification = `Untuk keberangkatan tanggal ${startDate || intent.startDate || "yang dipilih"}, jam berapa kendaraan mulai digunakan?`;
       }
 
       return Response.json({
@@ -502,11 +511,11 @@ ${message.trim()}
 
     const defaultEnd = assumedOneHour
 
-      ? addOneHour(intent.startDate, intent.startTime)
+      ? addOneHour(startDate, startTime)
 
       : {
 
-          endDate: intent.endDate || intent.startDate,
+          endDate: intent.endDate || startDate,
 
           endTime: intent.endTime!,
 
@@ -534,7 +543,7 @@ ${message.trim()}
 
     if (
 
-      !fleetData.days.includes(intent.startDate) ||
+      !fleetData.days.includes(startDate) ||
 
       !fleetData.days.includes(endDate)
 
@@ -559,9 +568,9 @@ ${message.trim()}
 
     const availability = checkFleetAvailability(fleetData, {
 
-      startDate: intent.startDate,
+      startDate,
 
-      startTime: intent.startTime,
+      startTime,
 
       endDate,
 
@@ -691,9 +700,9 @@ ${message.trim()}
 
         driver: selected.driver,
 
-        startDate: intent.startDate,
+        startDate,
 
-        startTime: intent.startTime,
+        startTime,
 
         endDate,
 
@@ -749,7 +758,7 @@ ${message.trim()}
 
 Unit: ${selected.name}
 Driver: ${selected.driver}
-Berangkat: ${intent.startDate} pukul ${intent.startTime}
+Berangkat: ${startDate} pukul ${startTime}
 Kembali: ${endDate} pukul ${endTime}
 Penumpang: ${intent.passengers ?? "Belum disebutkan"}
 Tujuan: ${intent.destination}
@@ -809,7 +818,7 @@ ${
           email: intent.email,
           whatsapp: intent.whatsapp,
           department: intent.department,
-          startDateTime: `${intent.startDate}T${intent.startTime}`,
+          startDateTime: `${startDate}T${startTime}`,
           endDateTime: `${endDate}T${endTime}`,
           vehicle: selected.name,
           destination: combinedDestination,
@@ -891,7 +900,7 @@ ${
     // Menghindari panggilan Gemini kedua agar pencarian kendaraan lebih cepat.
     // const recommendations = availability.available.slice(0, 10);
         const recommendations = availability.available;
-    const checkedText = `Jadwal yang dicek: ${intent.startDate} ${intent.startTime}–${endDate} ${endTime}.`;
+    const checkedText = `Jadwal yang dicek: ${startDate} ${startTime}–${endDate} ${endTime}.`;
     const durationNote = assumedOneHour
       ? "Catatan: jam kembali diasumsikan satu jam setelah berangkat."
       : "";
@@ -922,8 +931,8 @@ ${
       success: true,
       reply: availabilityReply,
       checked: {
-        startDate: intent.startDate,
-        startTime: intent.startTime,
+        startDate,
+        startTime,
         endDate,
         endTime,
         passengers: intent.passengers,
