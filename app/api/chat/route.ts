@@ -216,6 +216,31 @@ function normalize(value: unknown) {
 
 }
 
+/** Detect explicit requests for the assistant to choose a vehicle. */
+function userWantsAssistantToChooseVehicle(value: string): boolean {
+  const text = value
+    .toLowerCase()
+    .replace(/[.!?,;:]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return (
+    /\b(pilihkan|pilihin|pilih aja|pilih saja|pilihkan aja|pilihkan saja|terserah|bebas pilih|pilih bebas|rekomendasikan|sarankan)\b/.test(text) ||
+    /\bpilih(?:kan|in)?\b.*\b(apa aja|apa saja|mana aja|mana saja|bebas|terserah|yang cocok|yang terbaik)\b/.test(text) ||
+    /^(apa aja|apa saja|mana aja|mana saja|terserah|bebas saja|bebas pilih)$/.test(text)
+  );
+}
+
+function userExplicitlyConfirmed(value: string): boolean {
+  const text = value
+    .toLowerCase()
+    .replace(/[.!?,;:]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return /^(konfirmasi|konfirm|iya|iya konfirmasi|ya|ya konfirmasi|oke|ok|oke konfirmasi|ok konfirmasi|setuju|saya setuju|oke setuju|lanjut|lanjutkan|proses|lanjut proses)$/.test(text);
+}
+
 export async function POST(request: Request) {
 
   try {
@@ -250,7 +275,7 @@ export async function POST(request: Request) {
 
           )
 
-          .slice(-12)
+          .slice(-20)
 
       : [];
 
@@ -360,10 +385,13 @@ Aturan:
 - "Jam 9 pagi" berarti 09:00.
 
 - Jika user memilih "nomor 1", cocokkan dengan rekomendasi kendaraan
-
-- wajib menanyakan tanggal dan kembali unit
-
   yang benar-benar muncul dalam transkrip. Jangan mengarang unit.
+- Jika user berkata "pilihkan apa saja", "terserah", atau meminta kamu
+  memilihkan kendaraan, jangan mengulang daftar kendaraan. Pilih satu unit
+  dari hasil ketersediaan backend setelah pengecekan selesai.
+- Jangan menanyakan ulang tanggal atau jam yang sudah disebutkan dengan jelas.
+- Gunakan gaya percakapan seperti petugas reservasi yang ramah: satu pertanyaan
+  utama pada satu waktu, jangan memberikan daftar panjang jika tidak diperlukan.
 
 - Bedakan tujuan perjalanan dari keperluan perjalanan.
 - applicantName adalah nama lengkap pemohon.
@@ -373,12 +401,11 @@ Aturan:
 - Jika informasi SPPD, daftar tamu, atau hotel belum diberikan, gunakan null.
 - sppdFileUrl hanya isi jika user memberikan link https yang jelas untuk file SPPD.
 
-- bookingConfirmation hanya true jika PESAN USER TERBARU jelas
-
-  menyatakan setuju mengonfirmasi draft, misalnya "iya, konfirmasi".
-
+- bookingConfirmation hanya true jika pesan user TERBARU secara jelas
+  mengonfirmasi draft yang tepat sebelumnya. Kata "iya", "oke", "setuju",
+  "lanjut", atau "konfirmasi" hanya berarti konfirmasi jika balasan asisten
+  terakhir memang menampilkan draft dan meminta konfirmasi.
 - Persetujuan hanya berarti persetujuan terhadap draft, bukan booking
-
   sudah dibuat di sistem.
 
 - Jika sebuah informasi tidak pernah diberikan dan tidak bisa
@@ -447,8 +474,22 @@ Balas HANYA JSON valid:
 
     const intent = parseJson(intentResult.response.text());
 
+    // Jangan biarkan parser AI mengirim pengajuan hanya karena pesan seperti
+    // "iya" muncul tanpa draft yang sedang menunggu konfirmasi.
+    const previousAssistantMessage = [...history]
+      .reverse()
+      .find((item) => item.role === "assistant")?.content || "";
+    const previousAssistantAskedForConfirmation =
+      /berikut draft pengajuan kamu|balas konfirmasi hanya jika semua detail sudah benar/i
+        .test(previousAssistantMessage);
+    intent.bookingConfirmation =
+      previousAssistantAskedForConfirmation &&
+      userExplicitlyConfirmed(message);
 
-    if (!intent.isFleetRequest) {
+    const userAskedAssistantToChoose =
+      userWantsAssistantToChooseVehicle(message);
+
+    if (!intent.isFleetRequest && !userAskedAssistantToChoose) {
 
       const greeting = await model.generateContent(`
 
@@ -580,15 +621,22 @@ ${message.trim()}
 
     }) as unknown as FleetAvailabilityResult;
 
-    // 6. Jika unit sudah dipilih, validasi terhadap hasil backend
+    // 6. Pilih unit yang diminta atau, jika user meminta "pilihkan saja",
+    // ambil unit pertama dari hasil backend yang sudah dipastikan tersedia.
+    // Tidak ada booking yang dibuat pada tahap pemilihan ini.
+    const autoSelectedUnit =
+      userAskedAssistantToChoose && availability.available.length > 0
+        ? availability.available[0]
+        : null;
+    const requestedVehicleName = autoSelectedUnit?.name || intent.selectedVehicle;
 
-    if (intent.selectedVehicle) {
+    if (requestedVehicleName) {
 
       const selected = availability.available.find(
 
         (unit: any) =>
 
-          normalize(unit.name) === normalize(intent.selectedVehicle)
+          normalize(unit.name) === normalize(requestedVehicleName)
 
       );
 
@@ -598,7 +646,7 @@ ${message.trim()}
 
           (unit: any) =>
 
-            normalize(unit.name) === normalize(intent.selectedVehicle)
+            normalize(unit.name) === normalize(requestedVehicleName)
 
         );
 
@@ -620,6 +668,13 @@ ${message.trim()}
 
       if (!intent.destination) {
 
+        const driverText = selected.driver
+          ? ` dengan driver ${selected.driver}`
+          : "";
+        const selectionIntro = autoSelectedUnit
+          ? `Siap, kalau kamu bebas memilih, aku pilihkan **${selected.name}**${driverText}. Unit ini tersedia untuk jadwal yang kamu minta. Kita lanjutkan ya.`
+          : `Oke, **${selected.name}**${driverText} tersedia untuk jadwal tersebut.`;
+
         return Response.json({
 
           success: true,
@@ -628,7 +683,7 @@ ${message.trim()}
 
           selected_vehicle: selected.name,
 
-          reply: `Baik, kamu memilih ${selected.name}, dengan driver ${selected.driver}. Untuk menyiapkan draft pengajuan, tujuan perjalanannya ke mana?`,
+          reply: `${selectionIntro} Tujuan perjalanannya ke mana?`,
 
         });
 
@@ -644,7 +699,7 @@ ${message.trim()}
 
           selected_vehicle: selected.name,
 
-          reply: `Tujuan perjalanan: ${intent.destination}. Apa keperluan atau perihal perjalanan tersebut?`,
+          reply: `Oke, tujuan perjalananmu **${intent.destination}**. Untuk keperluan apa perjalanan ini?`,
 
         });
 
@@ -682,12 +737,10 @@ ${message.trim()}
           draft_status: "collecting_applicant_details",
           selected_vehicle: selected.name,
           reply: [
-            `Unit ${selected.name} tersedia untuk jadwal yang dipilih.`,
-            `Untuk melanjutkan pengajuan, kirim data berikut dalam satu pesan: ${missingApplicantFields.join(", ")}.`,
-            "Gunakan pilihan tipe perjalanan yang berlaku di P-CAR. Jika URGENT, sertakan alasannya.",
-            "Untuk perjalanan dinas, sertakan dasar/nomor SPPD.",
-            "Jika ada, sertakan daftar tamu, hotel, dan link HTTPS file SPPD.",
-            "Data identitas akan diperiksa admin sebelum pengajuan diteruskan ke approval."
+            `Oke, **${selected.name}** tersedia untuk jadwalmu. Kita tinggal melengkapi beberapa data sebelum draft bisa dibuat.`,
+            `Boleh kirim data berikut? ${missingApplicantFields.join(", ")}. Kamu bisa kirim sekaligus dalam satu pesan.`,
+            "Jika tipe perjalanan URGENT, sertakan alasannya. Jika perjalanan dinas, sertakan dasar/nomor SPPD.",
+            "Kalau tersedia, tambahkan daftar tamu, hotel, atau link HTTPS file SPPD. Admin tetap akan memeriksa identitas dan kelengkapan sebelum approval."
           ].join("\n\n"),
         });
       }
@@ -908,22 +961,27 @@ ${
     let availabilityReply: string;
     if (recommendations.length === 0) {
       availabilityReply = [
-        `Maaf, tidak ada kendaraan yang tersedia untuk jadwal tersebut.`,
+        `Aku sudah cek jadwalnya, tetapi belum ada kendaraan yang tersedia untuk waktu tersebut.`,
         checkedText,
         durationNote,
-        "Coba ubah jam atau tanggal, atau periksa kembali jumlah penumpang."
+        "Kamu mau coba waktu yang lebih awal atau lebih siang? Aku bisa cek ulang."
       ].filter(Boolean).join("\n\n");
     } else {
-      const recommendationText = recommendations.map((unit, index) =>
+      const visibleRecommendations = recommendations.slice(0, 5);
+      const recommendationText = visibleRecommendations.map((unit, index) =>
         `${index + 1}. ${unit.name}${unit.driver ? ` — driver ${unit.driver}` : ""}`
       ).join("\n");
+      const additionalCount = recommendations.length - visibleRecommendations.length;
+      const moreText = additionalCount > 0
+        ? `\nMasih ada ${additionalCount} kendaraan lain yang tersedia.`
+        : "";
 
       availabilityReply = [
-        `Berikut kendaraan yang tersedia untuk jadwal kamu:`,
+        `Aku menemukan **${recommendations.length} kendaraan** yang tersedia untuk jadwalmu.`,
         checkedText,
-        recommendationText,
+        recommendationText + moreText,
         durationNote,
-        "Pilih nomor atau tuliskan nama kendaraan untuk melanjutkan draft pengajuan."
+        `Mau pilih nomor berapa? Kalau kamu tidak punya preferensi, bilang **"pilihkan saja"** dan aku akan memilih salah satu unit yang tersedia untukmu.`
       ].filter(Boolean).join("\n\n");
     }
 
