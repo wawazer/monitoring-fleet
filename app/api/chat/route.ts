@@ -216,6 +216,48 @@ function normalize(value: unknown) {
 
 }
 
+/** Menjawab pertanyaan sampingan tentang identitas/kemampuan AI tanpa
+ * menjalankan ulang alur booking atau mengulang pertanyaan sebelumnya. */
+function getAssistantSideReply(value: string): string | null {
+  const text = value
+    .toLowerCase()
+    .replace(/[?!.,;:]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const identityQuestions = [
+    "kamu siapa",
+    "siapa kamu",
+    "kamu ini siapa",
+    "ini siapa",
+    "kamu siapa sih",
+    "siapa nama kamu",
+    "nama kamu siapa",
+    "kamu ai apa",
+    "ini ai apa",
+    "kamu robot",
+    "kamu manusia",
+  ];
+
+  if (identityQuestions.includes(text)) {
+    return "Aku AI Fleet Assistant, asisten virtual untuk membantu pengecekan ketersediaan kendaraan dan pengajuan peminjaman mobil P-CAR. Aku bisa bantu memilih unit, mencatat detail perjalanan, dan menyiapkan draft pengajuan. Aku bukan admin manusia, dan aku tidak bisa menyetujui booking sendiri. Mau kita lanjut dari pilihan kendaraan tadi?";
+  }
+
+  const capabilityQuestions = [
+    "kamu bisa apa",
+    "apa yang bisa kamu lakukan",
+    "bisa bantu apa",
+    "fitur kamu apa",
+    "kamu bisa bantu apa saja",
+  ];
+
+  if (capabilityQuestions.includes(text)) {
+    return "Aku bisa mengecek kendaraan yang tersedia berdasarkan tanggal dan jam, membantu memilih unit, menanyakan detail perjalanan yang belum lengkap, lalu menyiapkan draft pengajuan. Sebelum dikirim, kamu tetap bisa memeriksa detailnya. Pengajuan yang terkirim masih menunggu verifikasi dan approval admin.";
+  }
+
+  return null;
+}
+
 /** Detect explicit requests for the assistant to choose a vehicle. */
 function userWantsAssistantToChooseVehicle(value: string): boolean {
   const text = value
@@ -275,9 +317,20 @@ export async function POST(request: Request) {
 
           )
 
-          .slice(-20)
+          .slice(-30)
 
       : [];
+
+    // Pertanyaan sampingan seperti "kamu siapa" dijawab langsung. Ini mencegah
+    // konteks booking sebelumnya membuat AI mengulang pertanyaan tujuan.
+    const sideReply = getAssistantSideReply(message);
+    if (sideReply) {
+      return Response.json({
+        success: true,
+        reply: sideReply,
+        conversation_side_question: true,
+      });
+    }
 
     const apiKey = process.env.GEMINI_API_KEY;
 
@@ -371,6 +424,12 @@ Tanggal lokal hari ini: ${fleetData.days[0]}
 Tanggal yang tersedia dalam data: ${JSON.stringify(fleetData.days)}
 
 Pahami seluruh transkrip berikut, terutama pesan user terbaru.
+Gunakan riwayat untuk memahami konteks, tetapi tentukan isFleetRequest berdasarkan
+pesan terbaru: true jika pesan terbaru mencari/mengubah jadwal, memilih unit, atau
+menjawab pertanyaan yang sedang menunggu dalam proses pengajuan kendaraan. Jangan
+menganggap setiap pesan otomatis terkait booking hanya karena riwayat membahas booking.
+Jika pesan terbaru adalah pertanyaan sampingan atau obrolan umum, gunakan false dan
+jawab secara natural tanpa mengulang pertanyaan booking terakhir.
 Pertahankan tanggal, jam, jumlah penumpang, unit pilihan, tujuan,
 keperluan, dan data pemohon yang sudah diberikan sebelumnya.
 Jangan mengarang nama, NIPP, email, WhatsApp, unit kerja, atau tipe perjalanan.
